@@ -1,0 +1,845 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserRole {
+  GUEST
+  RETAIL_INVESTOR
+  OPERATOR
+  ISSUER
+  ADMIN
+}
+
+enum KycStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+}
+
+enum OrganizationType {
+  OPERATOR
+  ISSUER
+  MUNICIPALITY
+  SERVICE_PROVIDER
+  OTHER
+}
+
+enum AssetCategory {
+  COFFEE_SHOP
+  CAR_WASH
+  GYM
+  QSR
+  GPU_CLUSTER
+  SOLAR_PLANT
+  STORAGE_UNIT
+  EV_CHARGING
+  VENDING_MACHINE
+  ATM
+  MICRO_WAREHOUSE
+  RENDER_FARM
+  BATTERY_STORAGE
+  OTHER
+}
+
+enum AssetStatus {
+  DRAFT
+  PENDING_APPROVAL
+  FUNDING
+  LIVE
+  CLOSED
+}
+
+enum RiskRating {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum OfferingType {
+  EQUITY
+  REVENUE_SHARE
+  HYBRID
+}
+
+enum OfferingStatus {
+  DRAFT
+  PENDING_APPROVAL
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+enum SubscriptionStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  REJECTED
+}
+
+enum LendableAssetType {
+  VEHICLE
+  GPU
+  SOLAR
+  SCOOTER
+  SENSOR
+  STORAGE
+  DELIVERY_ROBOT
+  BATTERY_SWAP
+  OTHER
+}
+
+enum RevenueModel {
+  FLAT_FEE
+  REV_SHARE
+  PER_UNIT
+}
+
+enum LendableAssetStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+// ============================================================================
+// NEW ENUMS FOR ROYALTIES & CONTRACTS
+// ============================================================================
+
+enum RoyaltyCategory {
+  GOVERNMENT
+  INDUSTRIAL
+  MEDIA
+  SOFTWARE
+  EMERGING
+}
+
+enum RoyaltyStatus {
+  DRAFT
+  ACTIVE
+  MATURED
+  DEFAULTED
+}
+
+enum PayoutFrequency {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  SEASONAL
+  ANNUAL
+}
+
+// ============================================================================
+// NEW ENUMS FOR MUNICIPAL PROJECTS
+// ============================================================================
+
+enum ProjectType {
+  ROAD
+  TRANSIT
+  WATER
+  HOUSING
+  ENERGY
+  EV_CHARGING
+  BROADBAND
+  SMART_CITY
+  EMERGENCY
+  PARKS
+  FLOOD_PREVENTION
+  OTHER
+}
+
+enum ProjectStatus {
+  PLANNED
+  FUNDING
+  BUILDING
+  LIVE
+  COMPLETED
+}
+
+// ============================================================================
+// NEW ENUMS FOR ESG REWARDS
+// ============================================================================
+
+enum RewardActionCategory {
+  TRANSIT
+  ENERGY
+  RECYCLING
+  COMMUNITY
+  SMART_CITY
+}
+
+enum ChallengeType {
+  STREAK
+  COUNT
+  PROGRESS
+  SEASONAL
+}
+
+enum ChallengeStatus {
+  ACTIVE
+  COMPLETED
+  EXPIRED
+}
+
+enum RedemptionStatus {
+  PENDING
+  FULFILLED
+  CANCELLED
+}
+
+// ============================================================================
+// IDENTITY & ORGANIZATIONS
+// ============================================================================
+
+model User {
+  id                    String    @id @default(uuid())
+  email                 String    @unique
+  passwordHash          String    @map("password_hash")
+  firstName             String    @map("first_name")
+  lastName              String    @map("last_name")
+  role                  UserRole  @default(GUEST)
+  kycStatus             KycStatus @default(NOT_STARTED) @map("kyc_status")
+  country               String?
+  city                  String?
+  region                String?
+  walletAddress         String?   @map("wallet_address")
+  avatarUrl             String?   @map("avatar_url")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  organizationMemberships OrganizationMember[]
+  subscriptions           Subscription[]
+  lendableAssets          LendableAsset[]
+  performanceUploads      LendableAssetPerformance[]
+  rewardEvents            RewardEvent[]
+  royaltySubscriptions    RoyaltySubscription[]
+  municipalInvestments    MunicipalInvestment[]
+  impactPoints            UserImpactPoints?
+  impactActions           ImpactAction[]
+  challengeParticipations ChallengeParticipation[]
+  redemptions             PointRedemption[]
+  connectedDevices        SmartCityDevice[]
+
+  @@map("users")
+}
+
+model Organization {
+  id          String           @id @default(uuid())
+  name        String
+  type        OrganizationType
+  kybStatus   KycStatus        @default(NOT_STARTED) @map("kyb_status")
+  description String?
+  website     String?
+  logoUrl     String?          @map("logo_url")
+  metadata    Json?
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  // Relations
+  members         OrganizationMember[]
+  sponsoredAssets RealFiAsset[]
+  operatedAssets  LendableAsset[]
+  rewardPrograms  RewardProgram[]
+  royaltyStreams  TokenizedRoyalty[]
+  municipalProjects MunicipalProject[]
+
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String       @id @default(uuid())
+  userId         String       @map("user_id")
+  organizationId String       @map("organization_id")
+  role           String       @default("member") // owner, manager, analyst, member
+  joinedAt       DateTime     @default(now()) @map("joined_at")
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@map("organization_members")
+}
+
+// ============================================================================
+// TIER 1 - DIRECT INVESTMENT ASSETS & OFFERINGS
+// ============================================================================
+
+model RealFiAsset {
+  id              String        @id @default(uuid())
+  name            String
+  category        AssetCategory
+  description     String
+  locationRegion  String        @map("location_region")
+  sponsorOrgId    String        @map("sponsor_org_id")
+  status          AssetStatus   @default(DRAFT)
+  totalShares     Int           @map("total_shares")
+  pricePerShare   Decimal       @map("price_per_share") @db.Decimal(18, 6)
+  currency        String        @default("USD")
+  minInvestment   Decimal       @map("min_investment") @db.Decimal(18, 2)
+  maxInvestment   Decimal       @map("max_investment") @db.Decimal(18, 2)
+  targetRaise     Decimal       @map("target_raise") @db.Decimal(18, 2)
+  totalRaised     Decimal       @default(0) @map("total_raised") @db.Decimal(18, 2)
+  projectedApy    Decimal?      @map("projected_apy") @db.Decimal(5, 2)
+  riskRating      RiskRating    @default(MEDIUM) @map("risk_rating")
+  imageUrl        String?       @map("image_url")
+  documents       Json?         // Array of { name, url, type }
+  highlights      String[]      // Key selling points
+  tokenAddress    String?       @map("token_address") // On-chain token contract
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  sponsorOrg    Organization  @relation(fields: [sponsorOrgId], references: [id])
+  offerings     Offering[]
+  payoutEvents  PayoutEvent[]
+
+  @@map("realfi_assets")
+}
+
+model Offering {
+  id                   String         @id @default(uuid())
+  assetId              String         @map("asset_id")
+  name                 String
+  description          String?
+  offeringType         OfferingType   @default(EQUITY) @map("offering_type")
+  startDate            DateTime?      @map("start_date")
+  endDate              DateTime?      @map("end_date")
+  status               OfferingStatus @default(DRAFT)
+  allowedInvestorTypes String[]       @map("allowed_investor_types") // e.g., ["RETAIL", "ACCREDITED"]
+  allowedCountries     String[]       @map("allowed_countries")
+  restrictedCountries  String[]       @map("restricted_countries")
+  minInvestment        Decimal        @map("min_investment") @db.Decimal(18, 2)
+  maxInvestment        Decimal        @map("max_investment") @db.Decimal(18, 2)
+  targetRaise          Decimal        @map("target_raise") @db.Decimal(18, 2)
+  totalRaised          Decimal        @default(0) @map("total_raised") @db.Decimal(18, 2)
+  createdAt            DateTime       @default(now()) @map("created_at")
+  updatedAt            DateTime       @updatedAt @map("updated_at")
+
+  // Relations
+  asset         RealFiAsset    @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  subscriptions Subscription[]
+
+  @@map("offerings")
+}
+
+model Subscription {
+  id              String             @id @default(uuid())
+  offeringId      String             @map("offering_id")
+  userId          String             @map("user_id")
+  amountCommitted Decimal            @map("amount_committed") @db.Decimal(18, 2)
+  sharesAllocated Int                @default(0) @map("shares_allocated")
+  status          SubscriptionStatus @default(PENDING)
+  txHash          String?            @map("tx_hash") // Blockchain transaction
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  // Relations
+  offering Offering @relation(fields: [offeringId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+model PayoutEvent {
+  id                String   @id @default(uuid())
+  assetId           String   @map("asset_id")
+  eventDate         DateTime @map("event_date")
+  totalPayoutAmount Decimal  @map("total_payout_amount") @db.Decimal(18, 2)
+  currency          String   @default("USD")
+  notes             String?
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  // Relations
+  asset RealFiAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@map("payout_events")
+}
+
+// ============================================================================
+// TIER 2 - LENDABLE ASSETS
+// ============================================================================
+
+model LendableAsset {
+  id              String              @id @default(uuid())
+  ownerUserId     String              @map("owner_user_id")
+  operatorOrgId   String?             @map("operator_org_id")
+  assetType       LendableAssetType   @map("asset_type")
+  title           String
+  description     String?
+  locationRegion  String              @map("location_region")
+  capacityUnit    String              @map("capacity_unit") // e.g., kWh, TFLOPs_hour, rides_month
+  capacityMax     Decimal             @map("capacity_max") @db.Decimal(18, 4)
+  revenueModel    RevenueModel        @default(REV_SHARE) @map("revenue_model")
+  targetYield     Decimal?            @map("target_yield") @db.Decimal(5, 2)
+  isBuyToRent     Boolean             @default(false) @map("is_buy_to_rent")
+  status          LendableAssetStatus @default(DRAFT)
+  imageUrl        String?             @map("image_url")
+  metadata        Json?
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+
+  // Relations
+  owner       User                       @relation(fields: [ownerUserId], references: [id])
+  operator    Organization?              @relation(fields: [operatorOrgId], references: [id])
+  performance LendableAssetPerformance[]
+
+  @@map("lendable_assets")
+}
+
+model LendableAssetPerformance {
+  id               String   @id @default(uuid())
+  lendableAssetId  String   @map("lendable_asset_id")
+  periodStart      DateTime @map("period_start")
+  periodEnd        DateTime @map("period_end")
+  utilizationValue Decimal  @map("utilization_value") @db.Decimal(18, 4)
+  grossRevenue     Decimal  @map("gross_revenue") @db.Decimal(18, 2)
+  expenses         Decimal  @default(0) @db.Decimal(18, 2)
+  netYield         Decimal  @map("net_yield") @db.Decimal(18, 2)
+  uploadedByUserId String   @map("uploaded_by_user_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  // Relations
+  lendableAsset LendableAsset @relation(fields: [lendableAssetId], references: [id], onDelete: Cascade)
+  uploadedBy    User          @relation(fields: [uploadedByUserId], references: [id])
+
+  @@map("lendable_asset_performance")
+}
+
+// ============================================================================
+// TOKENIZED ROYALTIES & CONTRACTS
+// ============================================================================
+
+model TokenizedRoyalty {
+  id                  String          @id @default(uuid())
+  title               String
+  category            RoyaltyCategory
+  subcategory         String          @map("subcategory")
+  description         String?
+  counterparty        String          // Entity paying the royalty
+  jurisdiction        String
+  
+  // Contract details
+  contractTerm        String          @map("contract_term") // e.g., "5 Years", "Perpetual"
+  expectedPayout      PayoutFrequency @map("expected_payout")
+  contractDocumentUrl String?         @map("contract_document_url")
+  
+  // Tokenization
+  tokenSupply         Int             @map("token_supply")
+  tokenPrice          Decimal         @map("token_price") @db.Decimal(18, 2)
+  tokenAddress        String?         @map("token_address")
+  
+  // Financials
+  monthlyRevenue      Decimal         @map("monthly_revenue") @db.Decimal(18, 2)
+  revenueHistory      Json?           @map("revenue_history") // Array of monthly revenues
+  projectedApy        Decimal         @map("projected_apy") @db.Decimal(5, 2)
+  riskBand            RiskRating      @default(MEDIUM) @map("risk_band")
+  
+  // Status
+  status              RoyaltyStatus   @default(DRAFT)
+  fundedPercent       Decimal         @default(0) @map("funded_percent") @db.Decimal(5, 2)
+  
+  // Organization
+  issuerOrgId         String?         @map("issuer_org_id")
+  
+  // Media
+  imageUrl            String?         @map("image_url")
+  
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  issuerOrg           Organization?   @relation(fields: [issuerOrgId], references: [id])
+  subscriptions       RoyaltySubscription[]
+  payouts             RoyaltyPayout[]
+  revenueRecords      RoyaltyRevenueRecord[]
+
+  @@map("tokenized_royalties")
+}
+
+model RoyaltySubscription {
+  id              String   @id @default(uuid())
+  royaltyId       String   @map("royalty_id")
+  userId          String   @map("user_id")
+  tokensPurchased Int      @map("tokens_purchased")
+  purchasePrice   Decimal  @map("purchase_price") @db.Decimal(18, 2)
+  txHash          String?  @map("tx_hash")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // Relations
+  royalty TokenizedRoyalty @relation(fields: [royaltyId], references: [id], onDelete: Cascade)
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("royalty_subscriptions")
+}
+
+model RoyaltyPayout {
+  id              String   @id @default(uuid())
+  royaltyId       String   @map("royalty_id")
+  payoutDate      DateTime @map("payout_date")
+  totalAmount     Decimal  @map("total_amount") @db.Decimal(18, 2)
+  perTokenAmount  Decimal  @map("per_token_amount") @db.Decimal(18, 6)
+  txHash          String?  @map("tx_hash")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // Relations
+  royalty TokenizedRoyalty @relation(fields: [royaltyId], references: [id], onDelete: Cascade)
+
+  @@map("royalty_payouts")
+}
+
+model RoyaltyRevenueRecord {
+  id          String   @id @default(uuid())
+  royaltyId   String   @map("royalty_id")
+  periodStart DateTime @map("period_start")
+  periodEnd   DateTime @map("period_end")
+  revenue     Decimal  @db.Decimal(18, 2)
+  verified    Boolean  @default(false)
+  oracleRef   String?  @map("oracle_ref") // Reference to oracle verification
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  royalty TokenizedRoyalty @relation(fields: [royaltyId], references: [id], onDelete: Cascade)
+
+  @@map("royalty_revenue_records")
+}
+
+// ============================================================================
+// MUNICIPAL PROJECTS (UPGRADED)
+// ============================================================================
+
+model MunicipalProject {
+  id              String        @id @default(uuid())
+  name            String
+  projectType     ProjectType   @map("project_type")
+  description     String?
+  
+  // Location
+  city            String
+  region          String
+  country         String        @default("USA")
+  coordinates     Json?         // { lat, lng }
+  
+  // Funding
+  targetRaise     Decimal       @map("target_raise") @db.Decimal(18, 2)
+  totalRaised     Decimal       @default(0) @map("total_raised") @db.Decimal(18, 2)
+  minInvestment   Decimal       @default(100) @map("min_investment") @db.Decimal(18, 2)
+  projectedApy    Decimal       @map("projected_apy") @db.Decimal(5, 2)
+  
+  // Status & Timeline
+  status          ProjectStatus @default(PLANNED)
+  constructionStage String?     @map("construction_stage")
+  completionDate  String?       @map("completion_date") // e.g., "2025-Q3"
+  
+  // Impact Metrics
+  impactMetrics   Json?         @map("impact_metrics") // { co2Saved, citizensServed, jobsCreated, etc. }
+  esgTags         String[]      @map("esg_tags")
+  
+  // Municipal Partnership
+  partnerOrgId    String?       @map("partner_org_id")
+  partnerBadge    String?       @map("partner_badge")
+  
+  // Rewards
+  municipalPoints Int           @default(100) @map("municipal_points") // Points earned for investing
+  
+  // Media
+  imageUrl        String?       @map("image_url")
+  documents       Json?         // Project documentation
+  
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  partnerOrg      Organization? @relation(fields: [partnerOrgId], references: [id])
+  investments     MunicipalInvestment[]
+  milestones      ProjectMilestone[]
+
+  @@map("municipal_projects")
+}
+
+model MunicipalInvestment {
+  id              String   @id @default(uuid())
+  projectId       String   @map("project_id")
+  userId          String   @map("user_id")
+  amount          Decimal  @db.Decimal(18, 2)
+  pointsEarned    Int      @map("points_earned")
+  isLocalInvestor Boolean  @default(false) @map("is_local_investor")
+  txHash          String?  @map("tx_hash")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // Relations
+  project MunicipalProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("municipal_investments")
+}
+
+model ProjectMilestone {
+  id          String   @id @default(uuid())
+  projectId   String   @map("project_id")
+  name        String
+  description String?
+  targetDate  DateTime @map("target_date")
+  completed   Boolean  @default(false)
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  project MunicipalProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("project_milestones")
+}
+
+// ============================================================================
+// ESG REWARDS SYSTEM
+// ============================================================================
+
+model UserImpactPoints {
+  id              String   @id @default(uuid())
+  userId          String   @unique @map("user_id")
+  totalPoints     Int      @default(0) @map("total_points")
+  lifetimePoints  Int      @default(0) @map("lifetime_points")
+  currentStreak   Int      @default(0) @map("current_streak")
+  longestStreak   Int      @default(0) @map("longest_streak")
+  lastActionDate  DateTime? @map("last_action_date")
+  carbonSaved     Decimal  @default(0) @map("carbon_saved") @db.Decimal(10, 4) // in tons
+  tier            String   @default("Civic Starter")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_impact_points")
+}
+
+model ImpactAction {
+  id          String               @id @default(uuid())
+  userId      String               @map("user_id")
+  category    RewardActionCategory
+  actionType  String               @map("action_type") // e.g., "walking", "public_transit"
+  points      Int
+  quantity    Decimal?             @db.Decimal(10, 4) // e.g., miles walked, kWh saved
+  carbonImpact Decimal?            @map("carbon_impact") @db.Decimal(10, 6) // CO2 in tons
+  metadata    Json?                // Additional action data
+  verifiedBy  String?              @map("verified_by") // e.g., "manual", "smart_device", "oracle"
+  deviceId    String?              @map("device_id")
+  createdAt   DateTime             @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, category])
+  @@index([createdAt])
+  @@map("impact_actions")
+}
+
+model ImpactChallenge {
+  id              String          @id @default(uuid())
+  name            String
+  description     String
+  type            ChallengeType
+  category        RewardActionCategory?
+  
+  // Requirements
+  targetValue     Int             @map("target_value") // e.g., 5 days, 10 actions
+  
+  // Rewards
+  rewardPoints    Int             @map("reward_points")
+  
+  // Timing
+  startDate       DateTime        @map("start_date")
+  endDate         DateTime        @map("end_date")
+  
+  // Seasonal
+  isSeasonal      Boolean         @default(false) @map("is_seasonal")
+  seasonName      String?         @map("season_name")
+  
+  // Media
+  iconName        String?         @map("icon_name")
+  
+  status          ChallengeStatus @default(ACTIVE)
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  // Relations
+  participations ChallengeParticipation[]
+
+  @@map("impact_challenges")
+}
+
+model ChallengeParticipation {
+  id           String   @id @default(uuid())
+  challengeId  String   @map("challenge_id")
+  userId       String   @map("user_id")
+  progress     Int      @default(0)
+  completed    Boolean  @default(false)
+  completedAt  DateTime? @map("completed_at")
+  pointsAwarded Int     @default(0) @map("points_awarded")
+  joinedAt     DateTime @default(now()) @map("joined_at")
+
+  // Relations
+  challenge ImpactChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([challengeId, userId])
+  @@map("challenge_participations")
+}
+
+model RedemptionOption {
+  id              String   @id @default(uuid())
+  categoryName    String   @map("category_name") // e.g., "Transit", "Green Merchants"
+  name            String
+  description     String?
+  pointsCost      Int      @map("points_cost")
+  value           String   // e.g., "$5", "1 day pass"
+  iconName        String?  @map("icon_name")
+  partnerName     String?  @map("partner_name")
+  isActive        Boolean  @default(true) @map("is_active")
+  limitPerUser    Int?     @map("limit_per_user") // Monthly limit
+  totalAvailable  Int?     @map("total_available")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // Relations
+  redemptions PointRedemption[]
+
+  @@map("redemption_options")
+}
+
+model PointRedemption {
+  id          String           @id @default(uuid())
+  userId      String           @map("user_id")
+  optionId    String           @map("option_id")
+  pointsSpent Int              @map("points_spent")
+  status      RedemptionStatus @default(PENDING)
+  code        String?          // Redemption code if applicable
+  fulfilledAt DateTime?        @map("fulfilled_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  // Relations
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  option RedemptionOption @relation(fields: [optionId], references: [id])
+
+  @@map("point_redemptions")
+}
+
+model SmartCityDevice {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  deviceType  String   @map("device_type") // e.g., "thermostat", "ev_charger", "water_meter"
+  deviceId    String   @map("device_id")
+  deviceName  String?  @map("device_name")
+  provider    String?  // e.g., "Nest", "Tesla", "ChargePoint"
+  isActive    Boolean  @default(true) @map("is_active")
+  lastSync    DateTime? @map("last_sync")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceType, deviceId])
+  @@map("smart_city_devices")
+}
+
+// ============================================================================
+// LEGACY MODELS (DEPRECATED - Kept for migration)
+// ============================================================================
+
+enum RoyaltyType {
+  BUSINESS
+  INDUSTRIAL
+  IP
+}
+
+enum ContractType {
+  SERVICE
+  OFFTAKE
+  TECH_DEPLOYMENT
+  OTHER
+}
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  MATURED
+  DEFAULTED
+}
+
+model RoyaltyStream {
+  id                  String      @id @default(uuid())
+  name                String
+  underlyingReference String      @map("underlying_reference")
+  type                RoyaltyType
+  sharePercentage     Decimal     @map("share_percentage") @db.Decimal(5, 2)
+  payoutSchedule      String      @map("payout_schedule") // monthly, quarterly, etc.
+  jurisdiction        String?
+  riskRating          RiskRating  @default(MEDIUM) @map("risk_rating")
+  status              AssetStatus @default(DRAFT)
+  imageUrl            String?     @map("image_url")
+  createdAt           DateTime    @default(now()) @map("created_at")
+  updatedAt           DateTime    @updatedAt @map("updated_at")
+
+  @@map("royalty_streams")
+}
+
+model ContractInstrument {
+  id                 String         @id @default(uuid())
+  name               String
+  contractType       ContractType   @map("contract_type")
+  counterpartyA      String         @map("counterparty_a")
+  counterpartyB      String         @map("counterparty_b")
+  expectedCashflows  Json?          @map("expected_cashflows")
+  tokenizationParams Json?          @map("tokenization_params")
+  status             ContractStatus @default(DRAFT)
+  imageUrl           String?        @map("image_url")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  @@map("contract_instruments")
+}
+
+model RewardProgram {
+  id           String       @id @default(uuid())
+  name         String
+  description  String?
+  sponsorOrgId String?      @map("sponsor_org_id")
+  criteria     Json?        // Describes triggers for rewards
+  isActive     Boolean      @default(true) @map("is_active")
+  imageUrl     String?      @map("image_url")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  sponsorOrg Organization?  @relation(fields: [sponsorOrgId], references: [id])
+  events     RewardEvent[]
+
+  @@map("reward_programs")
+}
+
+model RewardEvent {
+  id        String   @id @default(uuid())
+  programId String   @map("program_id")
+  userId    String   @map("user_id")
+  amount    Decimal  @db.Decimal(18, 4)
+  reason    String
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  program RewardProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("reward_events")
+}
